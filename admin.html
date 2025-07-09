@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Adminübersicht</title>
+		<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+		<link rel="stylesheet" href="style.css">
+	</head>
+	<body>
+		<h1>Adminübersicht</h1>
+		<nav>
+			<a style="margin-right: 15px;"href="index.html">Bestellansicht</a>
+			<a href="pfand.html">Pfandübersicht</a>
+		</nav>
+		<p><strong>Gesamtumsatz:</strong> <span id="total-sales">0.00</span> Monti</p>
+		<canvas id="itemCountChart"></canvas>
+		<canvas id="revenueChart"></canvas>
+		<h2>⚠️ Alle Daten löschen</h2>
+		<button class="button-delete" onclick="resetDatabase()">Alles zurücksetzen</button>
+		<script type="module">
+			import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+			import { getDatabase, ref, onValue, remove } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+			
+			const firebaseConfig = {
+			  apiKey: "AIzaSyC1IhhtUk6eo5uoY53BkvT0anjfOC9Q9WA",
+			  authDomain: "sippay-843f0.firebaseapp.com",
+			  databaseURL: "https://sippay-843f0-default-rtdb.europe-west1.firebasedatabase.app",
+			  projectId: "sippay-843f0",
+			  storageBucket: "sippay-843f0.appspot.com",
+			  messagingSenderId: "166935769218",
+			  appId: "1:166935769218:web:e3ea910edef7bb3679c49b"
+			};
+			
+			const app = initializeApp(firebaseConfig);
+			const db = getDatabase(app);
+			
+			const ordersRef = ref(db, 'orders');
+			
+			onValue(ordersRef, snapshot => {
+			  const data = snapshot.val();
+			  if (!data) {
+			    document.getElementById("total-sales").textContent = "0.00";
+			    return;
+			  }
+			
+			  let totalRevenue = 0;
+			  const itemCounts = {};
+			  const itemRevenue = {};
+			
+			  Object.values(data).forEach(order => {
+			    totalRevenue += order.total || 0;
+			    if (Array.isArray(order.drinks)) {
+			      order.drinks.forEach(drink => {
+			        const key = `${drink.item}`;
+			        itemCounts[key] = (itemCounts[key] || 0) + drink.amount;
+			        itemRevenue[key] = (itemRevenue[key] || 0) + drink.amount * drink.price;
+			      });
+			    }
+			  });
+			
+			  document.getElementById("total-sales").textContent = totalRevenue.toFixed(2);
+			
+			  renderBarChart("itemCountChart", "Verkäufe pro Getränk", itemCounts);
+			  renderBarChart("revenueChart", "Umsatz pro Getränk (M)", itemRevenue, " M");
+			});
+			
+			function renderBarChart(canvasId, label, dataObj, suffix = "") {
+			  const ctx = document.getElementById(canvasId).getContext("2d");
+			  const chart = Chart.getChart(canvasId);
+			  if (chart) chart.destroy();
+			
+			  const labels = Object.keys(dataObj);
+			  const values = Object.values(dataObj);
+			
+			  new Chart(ctx, {
+			    type: "bar",
+			    data: {
+			      labels,
+			      datasets: [{
+			        label,
+			        data: values,
+			        backgroundColor: "#4e79a7"
+			      }]
+			    },
+			    options: {
+			      plugins: {
+			        legend: { display: false }
+			      },
+			      scales: {
+			        y: {
+			          beginAtZero: true,
+			          ticks: {
+			            callback: (value) => `${value}${suffix}`
+			          }
+			        }
+			      }
+			    }
+			  });
+			}
+			
+			window.resetDatabase = function () {
+  if (confirm("Wirklich ALLE Bestellungen & Pfand löschen? Das kann NICHT rückgängig gemacht werden!")) {
+    Promise.all([
+      remove(ref(db, 'orders')),
+      remove(ref(db, 'pfand_rueckgaben'))
+    ])
+    .then(() => alert("Alle Daten & Pfand zurückgesetzt."))
+    .catch(err => alert("Fehler beim Löschen: " + err.message));
+  }
+};
+		</script>
+	</body>
+</html>
