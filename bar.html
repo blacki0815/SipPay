@@ -4,11 +4,23 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<title>Bar Übersicht</title>
+		<script src="fontsize.js"></script>
+		<script src="script.js"></script>		
 		<link rel="stylesheet" href="style.css">
 	</head>
 	<body>
+		<div id="order-filter-overlay" style="
+			position: fixed; top: 90%; right: 5%; background: rgba(255,255,255,0.95);
+			padding: 10px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 9999;
+			">
+			<label>
+			<input type="radio" name="orderFilter" value="today" checked> Heute
+			</label>
+			<label>
+			<input type="radio" name="orderFilter" value="all"> Alle
+			</label>
+		</div>
 		<h1>Bestellübersicht</h1>
-		<a href="index.html">Bestellansicht</a>
 		<div class="section" data-status="offen">
 			<h2 onclick="toggleSection('offen')">- Offene Bestellungen (<span id="count-offen">0</span>)</h2>
 			<div id="offen"></div>
@@ -21,29 +33,14 @@
 			<h2 onclick="toggleSection('fertig')">- Fertig (<span id="count-fertig">0</span>)</h2>
 			<div id="fertig" class="hidden"></div>
 		</div>
-		<div style="margin-top: 80%" class="section" data-status="geloescht">
+		<div style="margin-top: 75%" class="section" data-status="geloescht">
 			<h2 onclick="toggleSection('geloescht')">- Papierkorb (<span id="count-geloescht">0</span>)</h2>
 			<div id="geloescht" class="hidden"></div>
 		</div>
-		<script type="module">
-			import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-			import {
-			  getDatabase, ref, onValue, update, remove
-			} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
-			
-			const firebaseConfig = {
-			  apiKey: "AIzaSyC1IhhtUk6eo5uoY53BkvT0anjfOC9Q9WA",
-			  authDomain: "sippay-843f0.firebaseapp.com",
-			  databaseURL: "https://sippay-843f0-default-rtdb.europe-west1.firebasedatabase.app",
-			  projectId: "sippay-843f0",
-			  storageBucket: "sippay-843f0.appspot.com",
-			  messagingSenderId: "166935769218",
-			  appId: "1:166935769218:web:e3ea910edef7bb3679c49b"
-			};
-			
-			const app = initializeApp(firebaseConfig);
-			const db = getDatabase(app);
-			const ordersRef = ref(db, 'orders');
+		<script>
+			let lastOrders = null;
+			let lastFilter = "today";
+			const BASE_URL = "http://192.168.2.92:8080";
 			
 			const containers = {
 			  offen: document.getElementById("offen"),
@@ -52,129 +49,148 @@
 			  geloescht: document.getElementById("geloescht")
 			};
 			
-			function formatTime(timestamp) {
-			  const date = new Date(timestamp);
-			  return date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+			function getFilterDate() {
+			  if (lastFilter === "today") {
+			    const today = new Date().toISOString().split("T")[0];
+			    return `?date=${today}`;
+			  }
+			  return "";
 			}
 			
-			onValue(ordersRef, snapshot => {
-			// Clear alle Container + Zähler
-			Object.entries(containers).forEach(([status, el]) => {
-			el.innerHTML = "";
-			document.getElementById(`count-${status}`).textContent = "0";
-			});
+			function loadOrders() {
+			  fetch(`${BASE_URL}/orders${getFilterDate()}`)
+			    .then(res => res.json())
+			    .then(data => {
+			      if (JSON.stringify(data) === JSON.stringify(lastOrders) && lastFilter === getSelectedFilter()) {
+			        return;
+			      }
 			
-			const data = snapshot.val();
-			if (!data) return;
+			      lastOrders = data;
+			      lastFilter = getSelectedFilter();
 			
-			const counts = { offen: 0, in_bearbeitung: 0, fertig: 0, geloescht: 0 };
+			      Object.entries(containers).forEach(([status, el]) => {
+			        el.innerHTML = "";
+			        document.getElementById(`count-${status}`).textContent = "0";
+			      });
+
+				  const disableProgress = (status === "in_bearbeitung");
 			
-			Object.entries(data).forEach(([id, order]) => {
-			const status = order.status || "offen";
-			if (!containers[status]) return;
+			      const counts = { offen: 0, in_bearbeitung: 0, fertig: 0, geloescht: 0 };
+			      if (!data || Object.keys(data).length === 0) {
+			        Object.keys(counts).forEach(status => {
+			          document.getElementById(`count-${status}`).textContent = "0";
+			        });
+			        return;
+			      }
 			
-			const container = containers[status];
-			counts[status]++;
+			      Object.entries(data).forEach(([id, order]) => {
+			        const status = order.status || "offen";
+			        if (!containers[status]) return;
 			
-			const div = document.createElement("div");
-			div.className = `order ${status}`;
+			        counts[status]++;
+			        const drinksList = order.drinks.map((drink, i) => {
+			          const isChecked = order.drinkStatus && order.drinkStatus[i];
+			          return `
+			            <label>
+			              <input type="checkbox" class="drink-checkbox" data-order-id="${id}" data-drink-index="${i}" onchange="updateDrinkProgress('${id}')" ${isChecked ? 'checked' : ''}>
+			              ${drink.amount}x ${drink.item} ${drink.size} 
+			            </label>`;
+			        }).join("<br>");
 			
-			const list = (order.drinks || []).map(d =>
-			`${d.amount}x ${d.size} ${d.item}`
-			).join(", ");
+			        const div = document.createElement("div");
+					const disableComplete = (status === "fertig");
+			        div.className = `order ${status}`;
+			        div.innerHTML = `
+			          <p style="float: right;">${new Date(order.timestamp).toLocaleString("de-DE", {
+					weekday: "long",   
+					hour: "2-digit",   
+					minute: "2-digit"  
+					})} Uhr</p>
+			          <p>Besteller: <strong>${order.name || "Unbekannt"}</strong></p>
+			          <p style="margin-top: -10px;">Kommentar: <strong>${order.comment || "--"}</strong></p>
+			          <p style="font-size: 1.3rem">${drinksList}</p>
+			          <progress id="progress-${id}" value="0" max="${order.drinks.length}" style="width: 100%; margin: 5px 0;"></progress>
+			          <p>Status: <span class="status">${order.status}</span></p>
+			          <button class="actionButton" onclick="updateStatus('${id}', 'in_bearbeitung')">
+			            <img src="icon/hourglass.svg" alt="In Bearbeitung" style="height: 1em;">
+			          </button>
+					<button style="background-color: #11990000; font-size: 2em;" id="complete-btn-${id}" onclick="updateStatus('${id}', 'fertig')" ${disableComplete ? "disabled" : ""}>
+						<img src="icon/check.svg" alt="Fertig" style="height: 1em; vertical-align: middle;">
+					</button>
+					<button 
+						style="float: right; background-color: #93141400; font-size: 2em;" 
+						onclick="cancelOrder('${id}', '${status}')">
+						<img src="icon/trash.svg" alt="Löschen" style="height: 1em; vertical-align: middle;">
+					</button>
+			        `;
+			        containers[status].appendChild(div);
+			        setTimeout(() => updateDrinkProgress(id), 0);
+			      });
 			
-			const absTime = new Date(order.timestamp).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-			const relTime = timeAgo(order.timestamp);
-			
-			const drinksList = order.drinks.map((drink, i) => {
-			const isChecked = order.drinkStatus && order.drinkStatus[i];
-			return `
-			 <label>
-			   <input type="checkbox" class="drink-checkbox" data-order-id="${id}" data-drink-index="${i}" onchange="updateDrinkProgress('${id}')" ${isChecked ? 'checked' : ''}>
-			   ${drink.amount}x ${drink.size} ${drink.item}
-			 </label>
-			`;
-			}).join("<br>");
-			div.innerHTML = `
-			<p>⏰ ${new Date(order.timestamp).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</p>
-			<p>Besteller: <strong>${order.name || "Unbekannt"}</strong></p>
-			<p>${drinksList}</p>
-			<progress id="progress-${id}" value="0" max="${order.drinks.length}" style="width: 100%; margin: 5px 0;"></progress>
-			<p>Status: <span class="status">${order.status}</span></p>
-			<button onclick="updateStatus('${id}', 'in_bearbeitung')">In Bearbeitung</button>
-			<button id="complete-btn-${id}" onclick="updateStatus('${id}', 'fertig')" disabled>Fertig</button>
-			<button onclick="cancelOrder('${id}')">Löschen</button>
-			`;
-			setTimeout(() => {
-			updateDrinkProgress(id);
-			}, 0);
+			      Object.entries(counts).forEach(([status, count]) => {
+			        document.getElementById(`count-${status}`).textContent = count;
+			      });
+			    });
+			}
 			
 			window.updateDrinkProgress = function(orderId) {
-			const checkboxes = document.querySelectorAll(`.drink-checkbox[data-order-id="${orderId}"]`);
-			const checkedStatus = Array.from(checkboxes).map(cb => cb.checked);
-			const checkedCount = checkedStatus.filter(Boolean).length;
-			
-			const progress = document.getElementById(`progress-${orderId}`);
-			const completeBtn = document.getElementById(`complete-btn-${orderId}`);
-			
-			if (progress) progress.value = checkedCount;
-			if (completeBtn) completeBtn.disabled = (checkedCount !== checkboxes.length);
-			
-			const orderRef = ref(db, `orders/${orderId}`);
-			update(orderRef, { drinkStatus: checkedStatus });
+				const checkboxes = document.querySelectorAll(`.drink-checkbox[data-order-id="${orderId}"]`);
+				const checkedStatus = Array.from(checkboxes).map(cb => cb.checked);
+				const checkedCount = checkedStatus.filter(Boolean).length;
+
+				const progress = document.getElementById(`progress-${orderId}`);
+				const completeBtn = document.getElementById(`complete-btn-${orderId}`);
+
+				if (progress) progress.value = checkedCount;
+				if (completeBtn) completeBtn.disabled = (checkedCount !== checkboxes.length);
+
+				const orderElement = checkboxes[0]?.closest(".order");
+				const currentStatus = orderElement?.classList.contains("offen") ? "offen" : null;
+				if (currentStatus === "offen" && checkedCount > 0) {
+					updateStatus(orderId, "in_bearbeitung");
+				}
+
+				fetch(`${BASE_URL}/orders/${orderId}`, {
+					method: "PUT",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ drinkStatus: checkedStatus })
+				});
 			};
 			
-			window.cancelOrder = function(orderId) {
-			updateStatus(orderId, "geloescht");
-			};
-			
-			
-			container.appendChild(div);
-			});
-			
-			// Zähler aktualisieren
-			Object.entries(counts).forEach(([status, count]) => {
-			const el = document.getElementById(`count-${status}`);
-			if (el) el.textContent = count;
-			});
-			});
-			
-			function renderButtons(id, status) {
-			  let buttons = "";
-			
-			  if (status !== "in_bearbeitung") {
-			    buttons += `<button onclick="updateStatus('${id}', 'in_bearbeitung')">In Bearbeitung</button>`;
-			  }
-			  if (status !== "fertig") {
-			    buttons += `<button onclick="updateStatus('${id}', 'fertig')">Fertig</button>`;
-			  }
-			  if (status !== "geloescht") {
-			    buttons += `<button onclick="updateStatus('${id}', 'geloescht')">Löschen</button>`;
-			  }
-			
-			  return buttons;
+			function updateStatus(orderId, newStatus) {
+			  fetch(`${BASE_URL}/orders/${orderId}`, {
+			    method: "PUT",
+			    headers: { "Content-Type": "application/json" },
+			    body: JSON.stringify({ status: newStatus })
+			  }).then(() => loadOrders());
 			}
 			
-			function timeAgo(timestamp) {
-			const seconds = Math.floor((Date.now() - timestamp) / 1000);
-			const minutes = Math.floor(seconds / 60);
-			const hours = Math.floor(minutes / 60);
+			window.cancelOrder = function(orderId, currentStatus) {
+				if (currentStatus !== "geloescht") {
+					updateStatus(orderId, "geloescht");
+				} else {
+					if (confirm("Bestellung wirklich dauerhaft löschen?")) {
+						fetch(`${BASE_URL}/orders/${orderId}`, { method: "DELETE" })
+							.then(() => loadOrders())
+							.catch(err => alert("Fehler beim endgültigen Löschen: " + err.message));
+					}
+				}
+			};
 			
-			if (seconds < 60) return "gerade eben";
-			if (minutes < 60) return `vor ${minutes} Min`;
-			if (hours < 24) return `vor ${hours} Std`;
-			return "vor längerer Zeit";
+			function toggleSection(status) {
+			  document.getElementById(status).classList.toggle("hidden");
 			}
 			
-			window.updateStatus = function (orderId, newStatus) {
-			  const orderRef = ref(db, `orders/${orderId}`);
-			  update(orderRef, { status: newStatus });
-			};
+			function getSelectedFilter() {
+			  return document.querySelector('input[name="orderFilter"]:checked').value;
+			}
 			
-			window.toggleSection = function (status) {
-			  const section = document.getElementById(status);
-			  section.classList.toggle("hidden");
-			};
+			document.querySelectorAll('input[name="orderFilter"]').forEach(input => {
+			  input.addEventListener("change", loadOrders);
+			});
+			
+			loadOrders();
+			setInterval(loadOrders, 3000);
 		</script>
 	</body>
 </html>

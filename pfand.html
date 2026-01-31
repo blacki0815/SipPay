@@ -1,81 +1,81 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pfandrückgabe</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <h1>Pfandrückgabe</h1>
-  <nav>
-    <a style="margin-right: 15px;" href="index.html">Bestellansicht</a>
-    <a href="admin.html">Adminansicht</a>
-  </nav>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pfandrückgabe</title>
+    <script src="fontsize.js"></script>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <h1>Pfandrückgabe</h1>
+    <nav>
+      <a style="margin-right: 15px;" href="index.html">Bestellansicht</a>
+      <a href="admin.html">Adminansicht</a>
+    </nav>
 
-  <section style="margin-top: 30px; background: #eefaf5; padding: 15px; border-radius: 10px;">
-    <h2>🥤 Pfandausgabe</h2>
-    <p>Becher aktuell im Umlauf: <span id="pfand-im-umlauf">?</span></p>
-    <p>Gesamtwert des Pfands: <strong><span id="pfand-wert">0.00</span> <s>M</s></strong></p>
-    <div style="margin-top: 10px; background: #c4f1e0; border-radius: 8px; overflow: hidden;">
-      <div id="pfand-bar" style="height: 20px; width: 0%; background: #38b2ac;"></div>
-    </div>
-  </section>
+    <section style="margin-top: 30px; background: #eefaf5; padding: 15px; border-radius: 10px;">
+      <h2>🥤 Pfandausgabe</h2>
+      <p>Becher aktuell im Umlauf: <span id="pfand-im-umlauf">?</span></p>
+      <p>Gesamtwert des Pfands: <strong><span id="pfand-wert">0.00</span> <s>M</s></strong></p>
+      <div style="margin-top: 10px; background: #c4f1e0; border-radius: 8px; overflow: hidden;">
+        <div id="pfand-bar" style="height: 20px; width: 0%; background: #38b2ac;"></div>
+      </div>
+    </section>
 
-  <form id="pfand-form" style="margin-top: 30px;">
-    <label for="anzahl">Anzahl Becher zurückgegeben:</label>
-<select id="anzahl" required></select>
-    <button type="submit">Eintragen</button>
-  </form>
+    <form id="pfand-form" style="margin-top: 30px;">
+      <label for="anzahl">Anzahl Becher zurückgegeben:</label>
+      <select id="anzahl" required></select>
+      <button type="submit">Eintragen</button>
+    </form>
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-    import {
-      getDatabase, ref, push, onValue
-    } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+    <script>
+      const BASE_URL = "http://192.168.2.92:8080"; 
 
-    const app = initializeApp({
-      apiKey: "AIzaSyC1IhhtUk6eo5uoY53BkvT0anjfOC9Q9WA",
-      authDomain: "sippay-843f0.firebaseapp.com",
-      databaseURL: "https://sippay-843f0-default-rtdb.europe-west1.firebasedatabase.app",
-      projectId: "sippay-843f0",
-      storageBucket: "sippay-843f0.appspot.com",
-      messagingSenderId: "166935769218",
-      appId: "1:166935769218:web:e3ea910edef7bb3679c49b"
-    });
-
-    const db = getDatabase(app);
-    const pfandRueckgabeRef = ref(db, "pfand_rueckgaben");
-
-    document.getElementById("pfand-form").addEventListener("submit", (e) => {
-      e.preventDefault();
-      const anzahl = parseInt(document.getElementById("anzahl").value);
-      if (anzahl > 0) {
-        push(pfandRueckgabeRef, {
-          timestamp: Date.now(),
-          anzahl: anzahl
-        }).then(() => {
-          alert("Rückgabe erfasst.");
-          document.getElementById("pfand-form").reset();
-        });
+      const dropdown = document.getElementById("anzahl");
+      for (let i = 1; i <= 20; i++) {
+        const option = document.createElement("option");
+        option.value = i;
+        option.textContent = i;
+        dropdown.appendChild(option);
       }
-    });
 
-    function updatePfandAnzeige() {
-      onValue(ref(db, "orders"), snapshot => {
-        let ausgegeben = 0;
-        snapshot.forEach(orderSnap => {
-          const order = orderSnap.val();
-          ausgegeben += order.pfand?.count || 0;
-        });
+      document.getElementById("pfand-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const anzahl = parseInt(document.getElementById("anzahl").value);
+        if (anzahl > 0) {
+          fetch(`${BASE_URL}/pfand_rueckgaben`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              timestamp: Date.now(),
+              anzahl: anzahl
+            })
+          }).then(res => res.json()).then(() => {
+            alert("Rückgabe erfasst.");
+            document.getElementById("pfand-form").reset();
+            updatePfandAnzeige(); 
+          });
+        }
+      });
 
-        onValue(ref(db, "pfand_rueckgaben"), rückgabeSnap => {
+      function updatePfandAnzeige() {
+        Promise.all([
+          fetch(`${BASE_URL}/orders`).then(res => res.json()),
+          fetch(`${BASE_URL}/pfand_rueckgaben`).then(res => res.json())
+        ]).then(([ordersData, rueckgabenData]) => {
+          let ausgegeben = 0;
           let zurück = 0;
-          rückgabeSnap.forEach(entry => {
-            zurück += entry.val().anzahl || 0;
+
+          Object.values(ordersData || {}).forEach(order => {
+            ausgegeben += order.pfand?.count || 0;
           });
 
-          const offen = ausgegeben - zurück;
+          Object.values(rueckgabenData || {}).forEach(entry => {
+            zurück += entry.anzahl || 0;
+          });
+
+          const offen = Math.max(ausgegeben - zurück, 0); 
           const pfandWert = offen * 1;
 
           document.getElementById("pfand-im-umlauf").textContent = offen;
@@ -83,20 +83,22 @@
 
           const bar = document.getElementById("pfand-bar");
           const prozent = ausgegeben > 0 ? (offen / ausgegeben) * 100 : 0;
-          bar.style.width = `${prozent.toFixed(1)}%`;
+          bar.style.width = `${Math.min(prozent, 100).toFixed(1)}%`;
+        }).catch(err => {
+          console.error("Fehler beim Laden der Pfanddaten:", err);
         });
-      });
-    }
+      }
 
-    updatePfandAnzeige();
+      updatePfandAnzeige();
+      setInterval(updatePfandAnzeige, 3000);
 
-    const dropdown = document.getElementById("anzahl");
-for (let i = 1; i <= 20; i++) {
-  const option = document.createElement("option");
-  option.value = i;
-  option.textContent = i;
-  dropdown.appendChild(option);
-}
-  </script>
-</body>
+          function applyFontScale() {
+    const savedScale = localStorage.getItem("font-scale") || "1";
+    document.documentElement.style.setProperty("--font-scale", savedScale);
+    document.body.style.fontSize = `${savedScale}em`;
+  }
+
+  applyFontScale();
+    </script>
+  </body>
 </html>

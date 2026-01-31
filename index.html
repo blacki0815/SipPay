@@ -4,209 +4,235 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<title>Trinkbar Kasse</title>
+		<script src="fontsize.js"></script>
+		<script src="script.js"></script>		
 		<link rel="stylesheet" href="style.css">
 	</head>
 	<body>
+		<div id="order-filter-overlay" style="
+			position: fixed; top: 90%; right: 5%; background: rgba(255,255,255,0.95);
+			padding: 10px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 9999;
+			">
+			<label>
+			<input type="radio" name="orderFilter" value="today" checked> Heute
+			</label>
+			<label>
+			<input type="radio" name="orderFilter" value="all"> Alle
+			</label>
+		</div>
 		<h1>Bestellung aufgeben</h1>
 		<nav>
 			<a style="margin-right: 15px;" href="bar.html">Auftragsansicht</a>
 			<a style="margin-right: 15px;" href="admin.html">Adminansicht</a>
-			<a href="pfand.html">Pfandansicht</a>
-
 		</nav>
 		<br /><br />
 		<div id="drink-list"></div>
 		<button onclick="addDrinkEntry()">+ Getränk hinzufügen</button>
 		<br /><br />
 		<label>Name: <br>
-			<input type="text" id="customer-name" placeholder="z.B. Benedikt" />
+		<input type="text" id="customer-name" placeholder="z.B. Benedikt" />
 		</label>
 		<br />
 		<label>Kommentar: <br>
-			<input type="text" id="comment" placeholder="z.B. ohne Eis" />
+		<input type="text" id="comment" placeholder="z.B. ohne Eis" />
 		</label>
-		<p>Becher-Pfand: <span id="pfand-count">0</span> Becher = <span id="pfand-cost">0.00</span> <s>M</s></p>
-		<p>Gesamtpreis <span style="font-weight: 100; font-size: 13px">inkl. Pfand: </span><span id="total-cost">0.00</span> <s>M</s></p>
-		<button onclick="sendOrder()">Bestellung absenden</button>
+		<div style="margin-top: 25px"class="price-row">
+			<span>Becher-Pfand: <span id="pfand-count">0</span> Becher</span>
+			<span><span id="pfand-cost">0.00</span> <s>M</s></span>
+		</div>
+		<div class="price-row" style="margin-top: 5px; margin-bottom: 15px;">
+			<span>Preis <span style="font-weight: 100; font-size: 13px">exkl. Pfand:</span></span>
+			<span><span id="netto-cost">0.00</span> <s>M</s></span>
+		</div>
+		<div class="price-row" style="font-size: 20px; text-decoration: underline 2px;">
+			<span>Gesamtpreis <span style="font-weight: 100; font-size: 13px">inkl. Pfand:</span></span>
+			<span><span id="total-cost">0.00</span> <s>M</s></span>
+		</div>
+		<button style="margin-top: 25px"onclick="sendOrder()">Bestellung absenden</button>
 		<h2 style="margin-top: 30%;">Vergangene Bestellungen</h2>
 		<div id="past-orders"></div>
 		<script type="module">
-			import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-			import { getDatabase, ref, push, set, onValue } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+			function applyFontScale() {
+			   const savedScale = localStorage.getItem("font-scale") || "1";
+			   document.documentElement.style.setProperty("--font-scale", savedScale);
+			   document.body.style.fontSize = `${savedScale}em`;
+			 }
 			
-			const firebaseConfig = {
-			  apiKey: "AIzaSyC1IhhtUk6eo5uoY53BkvT0anjfOC9Q9WA",
-			  authDomain: "sippay-843f0.firebaseapp.com",
-			  databaseURL: "https://sippay-843f0-default-rtdb.europe-west1.firebasedatabase.app",
-			  projectId: "sippay-843f0",
-			  storageBucket: "sippay-843f0.appspot.com",
-			  messagingSenderId: "166935769218",
-			  appId: "1:166935769218:web:e3ea910edef7bb3679c49b"
-			};
-			
-			const app = initializeApp(firebaseConfig);
-			const db = getDatabase(app);
-			
-			const prices = {
-			  "Wasser": { klein: 0, groß: 0 },
-			  "Fanta": { klein: 1, groß: 2 },
-			  "Sprite": { klein: 1, groß: 2 },
-			  "Apfelschorle": { klein: 1, groß: 2 },
-			  "Grüne Spinne": { klein: 2, groß: 3 },
-			  "Rote Spinne": { klein: 2, groß: 3 },
-			  "Blue Lagoon": { klein: 3, groß: 4 },
-			  "Lime Dudler": { klein: 3, groß: 4 },
-			  "Durstiger Hugo": { klein: 3, groß: 4 },
-			  "Mini-La Sunrise": { groß: 4 },
-			  "Caipi": { groß: 4 },
-			  "Mojito": { groß: 4 },
-			  "Wild-Berry": { groß: 4 }
-			};
-			
-function addDrinkEntry() {
-  const div = document.createElement("div");
-  div.className = "drink-entry";
-
-  const onlyLarge = ["Mini-La Sunrise", "Caipi", "Mojito", "Wild-Berry"];
-
-  div.innerHTML = `
-    <select class="drink">
-      ${Object.keys(prices).map(drink => `<option value="${drink}">${drink}</option>`).join('')}
-    </select>
-    <select class="size">
-      <option value="klein">klein</option>
-      <option value="groß">groß</option>
-    </select>
-    <select class="amount">
-      ${[...Array(10)].map((_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("")}
-    </select>
-    <button onclick="this.parentElement.remove(); updateTotalCost();">- Entfernen</button>
-  `;
-
-  const drinkSelect = div.querySelector(".drink");
-  const sizeSelect = div.querySelector(".size");
-
-  // Funktion zur Anpassung der Größe basierend auf der Auswahl
-  function updateSizeOptions() {
-    const selectedDrink = drinkSelect.value;
-    if (onlyLarge.includes(selectedDrink)) {
-      sizeSelect.value = "groß";
-      sizeSelect.querySelector("option[value='klein']").disabled = true;
-    } else {
-      sizeSelect.querySelector("option[value='klein']").disabled = false;
-    }
-    updateTotalCost();
-  }
-
-  // Event Listener hinzufügen
-  drinkSelect.addEventListener("change", updateSizeOptions);
-  sizeSelect.addEventListener("change", updateTotalCost);
-  div.querySelector(".amount").addEventListener("change", updateTotalCost);
-
-  // Direkt aufrufen bei Initialisierung
-  updateSizeOptions();
-
-  document.getElementById("drink-list").appendChild(div);
-  updateTotalCost();
-}
-
-window.addDrinkEntry = addDrinkEntry;
-			
-function updateTotalCost() {
-  let total = 0;
-  let totalPfand = 0;
-  document.querySelectorAll(".drink-entry").forEach(entry => {
-    const drink = entry.querySelector(".drink").value;
-    const size = entry.querySelector(".size").value;
-    const amount = parseInt(entry.querySelector(".amount").value);
-    if (!isNaN(amount)) {
-      total += prices[drink][size] * amount;
-      totalPfand += amount; // 1 Becher = 1 Pfand
-    }
-  });
-
-  const pfandWert = totalPfand * 1; // 1€ pro Becher
-  const gesamt = total + pfandWert;
-
-  document.getElementById("pfand-count").textContent = totalPfand;
-  document.getElementById("pfand-cost").textContent = pfandWert.toFixed(2);
-  document.getElementById("total-cost").textContent = gesamt.toFixed(2);
-}
-
-window.updateTotalCost = updateTotalCost;
-
-// Live-Update bei Interaktion
-document.addEventListener("input", event => {
-  if (
-    event.target.classList.contains("drink") ||
-    event.target.classList.contains("size") ||
-    event.target.classList.contains("amount")
-  ) {
-    updateTotalCost();
-  }
-});
-			
-function sendOrder() {
-  const entries = Array.from(document.querySelectorAll(".drink-entry"));
-  if (entries.length === 0) return alert("Bitte mindestens 1 Getränk wählen.");
-
-  const drinks = entries.map(entry => {
-    const drink = entry.querySelector(".drink").value;
-    const size = entry.querySelector(".size").value;
-    const amount = parseInt(entry.querySelector(".amount").value);
-    return { item: drink, size, amount, price: prices[drink][size] };
-  });
-
-  const name = document.getElementById("customer-name").value.trim();
-const comment = document.getElementById("comment").value;
-
-  // Pfand berechnen
-  let pfandCount = 0;
-  drinks.forEach(d => pfandCount += d.amount);
-  const pfandAmount = pfandCount * 1;
-  const getTotal = parseFloat(document.getElementById("total-cost").textContent);
-
-  const orderRef = push(ref(db, 'orders'));
-  set(orderRef, {
-    drinks,
-    comment,
-	name,
-    total: getTotal,
-    pfand: {
-      count: pfandCount,
-      amount: pfandAmount
-    },
-    status: "offen",
-    timestamp: Date.now()
-  }).then(() => {
-    const summary = drinks.map(d => `${d.amount}x ${d.size} ${d.item}`).join(", ");
-    alert(`Bestellung gesendet:\n${summary}\nHinweis: ${comment || "-"}\nBecher: ${pfandCount}x = ${pfandAmount.toFixed(2)} € Pfand\nGesamt: ${getTotal.toFixed(2)} €`);
-
-    // 🧹 Felder leeren
-    document.getElementById("drink-list").innerHTML = "";
-    document.getElementById("comment").value = "";
-    document.getElementById("pfand-count").textContent = "0";
-    document.getElementById("pfand-cost").textContent = "0.00";
-    document.getElementById("total-cost").textContent = "0.00";
-  });
-}
-			
-			window.sendOrder = sendOrder;
-			
-			// 🔄 Vergangene Bestellungen anzeigen
-			const pastOrdersDiv = document.getElementById("past-orders");
-			onValue(ref(db, 'orders'), snapshot => {
-			  const data = snapshot.val();
-			  pastOrdersDiv.innerHTML = "";
-			  if (!data) return;
-			  Object.values(data).slice(-5).reverse().forEach(order => {
-			    const time = new Date(order.timestamp).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-			    const list = order.drinks.map(d => `${d.amount}x ${d.size} ${d.item}`).join(", ");
-			    const div = document.createElement("div");
-			    div.innerHTML = `⏰ ${time} – ${list} (${order.total.toFixed(0)} M)`;
-			    pastOrdersDiv.appendChild(div);
-			  });
+			 applyFontScale();
+					const prices = {
+					  "Wasser": { klein: 0, groß: 0 },
+					  "Minzwasser": { klein: 0, groß: 0},
+					  "Fanta": { klein: 2, groß: 3 },
+					  "Sprite": { klein: 2, groß: 3 },
+					  "Apfelschorle": { klein: 2, groß: 3 },
+					  "Grüne Spinne": { klein: 1, groß: 2 },
+					  "Rote Spinne": { klein: 1, groß: 2 },
+					  "Blue Lagoon": { groß: 14 },
+					  "Green Lagoon": { groß: 5},
+					  "Red Lagoon": { groß: 5},
+					  /*"Lime Dudler": { groß: 5 },*/
+					  /*"Durstiger Hugo": { groß: 3 },*/
+					  "Mini-La Sunrise": { groß: 3 },
+					  /*"Caipi": { groß: 7 },*/
+					  "Mojito": { groß: 5 },
+					  "Wild-Berry": { groß: 5 },
+					  "Bananenmilch": { groß: 9}
+					};
+					
+					function addDrinkEntry() {
+					const div = document.createElement("div");
+					div.className = "drink-entry";
+					
+					const onlyLarge = ["Mini-La Sunrise", "Caipi", "Mojito", "Wild-Berry", "Durstiger Hugo", "Lime Dudler", "Blue Lagoon", "Bananenmilch", "Red Lagoon", "Green Lagoon"];
+					
+					div.innerHTML = `
+					 <select class="drink">
+					   ${Object.keys(prices).map(drink => `<option value="${drink}">${drink}</option>`).join('')}
+					 </select>
+					 <select class="size">
+					   <option value="klein">klein</option>
+					   <option value="groß">groß</option>
+					 </select>
+					 <select class="amount">
+					   ${[...Array(10)].map((_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("")}
+					 </select>
+					 <button onclick="this.parentElement.remove(); updateTotalCost();">- Entfernen</button>
+					`;
+					
+					const drinkSelect = div.querySelector(".drink");
+					const sizeSelect = div.querySelector(".size");
+					
+					function updateSizeOptions() {
+					 const selectedDrink = drinkSelect.value;
+					 if (onlyLarge.includes(selectedDrink)) {
+					   sizeSelect.value = "groß";
+					   sizeSelect.querySelector("option[value='klein']").disabled = true;
+					 } else {
+					   sizeSelect.querySelector("option[value='klein']").disabled = false;
+					 }
+					 updateTotalCost();
+					}
+					
+					drinkSelect.addEventListener("change", updateSizeOptions);
+					sizeSelect.addEventListener("change", updateTotalCost);
+					div.querySelector(".amount").addEventListener("change", updateTotalCost);
+					
+					updateSizeOptions();
+					
+					document.getElementById("drink-list").appendChild(div);
+					updateTotalCost();
+					}
+					
+					window.addDrinkEntry = addDrinkEntry;
+					
+					function updateTotalCost() {
+					let total = 0;
+					let totalPfand = 0;
+					document.querySelectorAll(".drink-entry").forEach(entry => {
+					 const drink = entry.querySelector(".drink").value;
+					 const size = entry.querySelector(".size").value;
+					 const amount = parseInt(entry.querySelector(".amount").value);
+					 if (!isNaN(amount)) {
+					   total += prices[drink][size] * amount;
+					   totalPfand += amount; 
+					 }
+					});
+					
+					const pfandWert = totalPfand * 1; 
+					const gesamt = total + pfandWert;
+					
+					document.getElementById("pfand-count").textContent = totalPfand;
+					document.getElementById("pfand-cost").textContent = pfandWert.toFixed(2);
+					document.getElementById("total-cost").textContent = gesamt.toFixed(2);
+					const netto = total;
+					document.getElementById("netto-cost").textContent = netto.toFixed(2);
+					}
+					
+					window.updateTotalCost = updateTotalCost;
+					
+					document.addEventListener("input", event => {
+					if (
+					 event.target.classList.contains("drink") ||
+					 event.target.classList.contains("size") ||
+					 event.target.classList.contains("amount")
+					) {
+					 updateTotalCost();
+					}
+					});
+					
+					function sendOrder() {
+					const entries = Array.from(document.querySelectorAll(".drink-entry"));
+					if (entries.length === 0) return alert("Bitte mindestens 1 Getränk wählen.");
+					
+					const drinks = entries.map(entry => {
+					 const drink = entry.querySelector(".drink").value;
+					 const size = entry.querySelector(".size").value;
+					 const amount = parseInt(entry.querySelector(".amount").value);
+					 return { item: drink, size, amount, price: prices[drink][size] };
+					});
+					
+					const name = document.getElementById("customer-name").value.trim();
+					const comment = document.getElementById("comment").value;
+					
+					let pfandCount = 0;
+					drinks.forEach(d => pfandCount += d.amount);
+					const pfandAmount = pfandCount * 1;
+					const getTotal = parseFloat(document.getElementById("total-cost").textContent);
+					
+					fetch("http://192.168.2.92:8080/orders", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+					 drinks,
+					 comment,
+					 name,
+					 total: getTotal,
+					 pfand: {
+					   count: pfandCount,
+					   amount: pfandAmount
+					 },
+					 status: "offen",
+					 timestamp: Date.now()
+					})
+					}).then(res => res.json()).then(data => {
+					alert("Bestellung gesendet!");
+					 document.getElementById("drink-list").innerHTML = "";
+					 document.getElementById("comment").value = "";
+					 document.getElementById("customer-name").value = "";
+					 document.getElementById("pfand-count").textContent = "0";
+					 document.getElementById("pfand-cost").textContent = "0.00";
+					 document.getElementById("total-cost").textContent = "0.00";
+					});
+					}
+					
+					window.sendOrder = sendOrder;
+					
+					function loadPastOrders() {
+					fetch("http://192.168.2.92:8080/orders")
+					 .then(res => res.json())
+					 .then(data => {
+					   pastOrdersDiv.innerHTML = "";
+					   const orders = Object.values(data || {}).slice(-5).reverse();
+					   orders.forEach(order => {
+					     const time = new Date(order.timestamp).toLocaleString("de-DE", {
+			 weekday: "long",    
+			 hour: "2-digit",    
+			 minute: "2-digit"   
 			});
+					     const list = order.drinks.map(d => `${d.amount}x ${d.item} ${d.size}`).join(", ");
+					     const div = document.createElement("div");
+					     div.innerHTML = `⏰ ${time} – ${list} (${order.total.toFixed(0)} M)`;
+					     pastOrdersDiv.appendChild(div);
+					   });
+					 });
+					}
+					
+					const pastOrdersDiv = document.getElementById("past-orders");
+					loadPastOrders();
+					setInterval(() => {
+					loadPastOrders();
+					}, 7000);
+				
 		</script>
 	</body>
 </html>

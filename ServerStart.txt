@@ -1,0 +1,22 @@
+cd /Users/raphael/Documents/Mini-La/fritzBox
+
+
+node server.js
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -4,66 +4,132 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<title>Adminübersicht</title>
-		<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+		<script src="lib/chart.umd.min.js"></script>		
+		<script src="fontsize.js"></script>
 		<link rel="stylesheet" href="style.css">
 	</head>
 	<body>
 		<h1>Adminübersicht</h1>
 		<nav>
-			<a style="margin-right: 15px;"href="index.html">Bestellansicht</a>
-			<a href="pfand.html">Pfandübersicht</a>
+			<a style="margin-right: 15px;" href="index.html">Bestellansicht</a>
 		</nav>
-		<p><strong>Gesamtumsatz:</strong> <span id="total-sales">0.00</span> Monti</p>
+		<br><br>
+		<label for="day-filter">Tag auswählen:</label>
+		<select id="day-filter"></select>
+		<div id="hard-facts" style="margin-top:20px;">
+			<p><strong>Gesamtumsatz:</strong> <span id="total-sales">0.00</span> <s>M</s></p>
+			<p><strong>Gesamtbestellungen:</strong> <span id="total-orders">0</span></p>
+			<p><strong>Gesamtgetränke:</strong> <span id="total-drinks">0</span></p>
+			<p><strong>Ø Umsatz pro Bestellung:</strong> <span id="avg-order">0.00</span> <s>M</s></p>
+		</div>
+		<canvas id="dailyRevenueChart"></canvas>
 		<canvas id="itemCountChart"></canvas>
-		<canvas id="revenueChart"></canvas>
-		<h2>⚠️ Alle Daten löschen</h2>
+		<canvas id="itemRevenueChart"></canvas>
+		<br>
+		<h2 for="font-scale">Schriftgröße:</h2>
+		<select id="font-scale">
+			<option value="1">1x (Standard)</option>
+			<option value="1.25">1.25x</option>
+			<option value="1.5">1.5x</option>
+			<option value="2">2x</option>
+		</select>
+		<br><br>
+		<!--
+		<h2>Alle Daten löschen</h2>
 		<button class="button-delete" onclick="resetDatabase()">Alles zurücksetzen</button>
-		<script type="module">
-			import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-			import { getDatabase, ref, onValue, remove } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-database.js";
+		-->
+		<script>
+			const BASE_URL = "http://192.168.2.92:8080";
+			const dayFilter = document.getElementById("day-filter");
+			let allOrders = {};
 			
-			const firebaseConfig = {
-			  apiKey: "AIzaSyC1IhhtUk6eo5uoY53BkvT0anjfOC9Q9WA",
-			  authDomain: "sippay-843f0.firebaseapp.com",
-			  databaseURL: "https://sippay-843f0-default-rtdb.europe-west1.firebasedatabase.app",
-			  projectId: "sippay-843f0",
-			  storageBucket: "sippay-843f0.appspot.com",
-			  messagingSenderId: "166935769218",
-			  appId: "1:166935769218:web:e3ea910edef7bb3679c49b"
-			};
+			function loadStatistics() {
+			  fetch(`${BASE_URL}/orders`)
+			    .then(res => res.json())
+			    .then(data => {
+			      allOrders = data || {};
+			      fillDayFilter();
+			      updateStatistics();
+			    });
+			}
 			
-			const app = initializeApp(firebaseConfig);
-			const db = getDatabase(app);
+			function fillDayFilter() {
+			  const dates = [...new Set(Object.values(allOrders)
+			    .filter(o => o.timestamp)
+			    .map(o => new Date(o.timestamp).toISOString().split("T")[0])
+			  )].sort();
 			
-			const ordersRef = ref(db, 'orders');
+			  dayFilter.innerHTML = `<option value="all">Alle Tage</option>` +
+			dates.map(d => {
+			const dateObj = new Date(d);
+			const formatted = dateObj.toLocaleDateString("de-DE", {
+			weekday: "long",
+			day: "2-digit",
+			month: "2-digit"
+			});
+			return `<option value="${d}">${formatted}</option>`;
+			}).join("");    }
 			
-			onValue(ordersRef, snapshot => {
-			  const data = snapshot.val();
-			  if (!data) {
-			    document.getElementById("total-sales").textContent = "0.00";
-			    return;
+			function updateStatistics() {
+			  const selectedDay = dayFilter.value;
+			  let filteredOrders = Object.values(allOrders);
+			
+			  if (selectedDay !== "all") {
+			    filteredOrders = filteredOrders.filter(o =>
+			      o.timestamp && new Date(o.timestamp).toISOString().split("T")[0] === selectedDay
+			    );
 			  }
 			
-			  let totalRevenue = 0;
-			  const itemCounts = {};
-			  const itemRevenue = {};
-			
-			  Object.values(data).forEach(order => {
-			    totalRevenue += order.total || 0;
-			    if (Array.isArray(order.drinks)) {
-			      order.drinks.forEach(drink => {
-			        const key = `${drink.item}`;
-			        itemCounts[key] = (itemCounts[key] || 0) + drink.amount;
-			        itemRevenue[key] = (itemRevenue[key] || 0) + drink.amount * drink.price;
-			      });
-			    }
-			  });
+			  const totalRevenue = filteredOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+			  const totalOrders = filteredOrders.length;
+			  const totalDrinks = filteredOrders.reduce((sum, o) =>
+			    sum + (o.drinks ? o.drinks.reduce((s, d) => s + d.amount, 0) : 0), 0
+			  );
+			  const avgOrder = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 			
 			  document.getElementById("total-sales").textContent = totalRevenue.toFixed(2);
+			  document.getElementById("total-orders").textContent = totalOrders;
+			  document.getElementById("total-drinks").textContent = totalDrinks;
+			  document.getElementById("avg-order").textContent = avgOrder.toFixed(2);
+			
+			  renderDailyRevenueChart(filteredOrders);
+			  renderItemChart(filteredOrders);
+			renderItemRevenueChart(filteredOrders);
+			}
+			
+			function renderDailyRevenueChart(filteredOrders) {
+			  const dailyData = {};
+			  filteredOrders.forEach(o => {
+			    if (!o.timestamp) return;
+			    const day = new Date(o.timestamp).toISOString().split("T")[0];
+			    dailyData[day] = (dailyData[day] || 0) + (o.total || 0);
+			  });
+			
+			  renderBarChart("dailyRevenueChart", "Umsatz pro Tag", dailyData, " M");
+			}
+			
+			function renderItemChart(filteredOrders) {
+			  const itemCounts = {};
+			  filteredOrders.forEach(order => {
+			    order.drinks?.forEach(drink => {
+			      itemCounts[drink.item] = (itemCounts[drink.item] || 0) + drink.amount;
+			    });
+			  });
 			
 			  renderBarChart("itemCountChart", "Verkäufe pro Getränk", itemCounts);
-			  renderBarChart("revenueChart", "Umsatz pro Getränk (M)", itemRevenue, " M");
+			}
+			
+			function renderItemRevenueChart(filteredOrders) {
+			const itemRevenue = {};
+			filteredOrders.forEach(order => {
+			order.drinks?.forEach(drink => {
+			  const revenue = drink.amount * (drink.price || 0);
+			  itemRevenue[drink.item] = (itemRevenue[drink.item] || 0) + revenue;
 			});
+			});
+			
+			renderBarChart("itemRevenueChart", "Umsatz pro Getränk", itemRevenue, " M");
+			}
 			
 			function renderBarChart(canvasId, label, dataObj, suffix = "") {
 			  const ctx = document.getElementById(canvasId).getContext("2d");
@@ -73,42 +139,57 @@
 			  const labels = Object.keys(dataObj);
 			  const values = Object.values(dataObj);
 			
+			  if (labels.length === 0) {
+			    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+			    ctx.font = "16px Arial";
+			    ctx.fillText("Keine Daten verfügbar", 10, 30);
+			    return;
+			  }
+			
 			  new Chart(ctx, {
 			    type: "bar",
 			    data: {
 			      labels,
-			      datasets: [{
-			        label,
-			        data: values,
-			        backgroundColor: "#4e79a7"
-			      }]
+			      datasets: [{ label, data: values, backgroundColor: "#4e79a7" }]
 			    },
 			    options: {
-			      plugins: {
-			        legend: { display: false }
-			      },
-			      scales: {
-			        y: {
-			          beginAtZero: true,
-			          ticks: {
-			            callback: (value) => `${value}${suffix}`
-			          }
-			        }
-			      }
+			      scales: { y: { beginAtZero: true } },
+			      plugins: { legend: { display: false } }
 			    }
 			  });
 			}
 			
+			dayFilter.addEventListener("change", updateStatistics);
+			
 			window.resetDatabase = function () {
-  if (confirm("Wirklich ALLE Bestellungen & Pfand löschen? Das kann NICHT rückgängig gemacht werden!")) {
-    Promise.all([
-      remove(ref(db, 'orders')),
-      remove(ref(db, 'pfand_rueckgaben'))
-    ])
-    .then(() => alert("Alle Daten & Pfand zurückgesetzt."))
-    .catch(err => alert("Fehler beim Löschen: " + err.message));
-  }
-};
+			  if (confirm("Wirklich ALLE Bestellungen & Pfand-Daten löschen?")) {
+			    Promise.all([
+			      fetch(`${BASE_URL}/orders`, { method: "DELETE" }),
+			      fetch(`${BASE_URL}/pfand_rueckgaben`, { method: "DELETE" })
+			    ])
+			      .then(() => {
+			        alert("Alle Daten wurden gelöscht.");
+			        loadStatistics();
+			      })
+			      .catch(err => alert("Fehler beim Löschen: " + err.message));
+			  }
+			};
+			
+			const fontScaleSelect = document.getElementById("font-scale");
+			function applyFontScale(scale) {
+			  document.documentElement.style.setProperty("--font-scale", scale);
+			  document.body.style.fontSize = `${scale}em`;
+			}
+			const savedScale = localStorage.getItem("font-scale") || "1";
+			fontScaleSelect.value = savedScale;
+			applyFontScale(savedScale);
+			fontScaleSelect.addEventListener("change", () => {
+			  const scale = fontScaleSelect.value;
+			  localStorage.setItem("font-scale", scale);
+			  applyFontScale(scale);
+			});
+			
+			loadStatistics();
 		</script>
 	</body>
 </html>
